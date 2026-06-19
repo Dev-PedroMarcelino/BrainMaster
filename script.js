@@ -23,6 +23,7 @@
     selectedNode: null,
     aiConfig: {
       enabled: false,
+      preset: '',
       baseUrl: 'https://api.openai.com/v1',
       apiKey: '',
       model: 'gpt-4o-mini',
@@ -79,6 +80,7 @@
     aiModel: $('aiModel'),
     aiKeyToggle: $('aiKeyToggle'),
     aiTestBtn: $('aiTestBtn'),
+    aiPreset: $('aiPreset'),
   };
 
   // ============================================================
@@ -164,11 +166,32 @@
     dom.aiApiKey.value = state.aiConfig.apiKey || '';
     dom.aiModel.value = state.aiConfig.model || '';
     dom.aiConfigBox.hidden = !state.aiConfig.enabled;
+    dom.aiPreset.value = state.aiConfig.preset || '';
   }
   applyAIConfigToUI();
   dom.aiEnabled.addEventListener('change', () => {
     state.aiConfig.enabled = dom.aiEnabled.checked;
     dom.aiConfigBox.hidden = !state.aiConfig.enabled;
+    persistAI();
+  });
+
+  const AI_PRESETS = {
+    groq:      { baseUrl: 'https://api.groq.com/openai/v1',  model: 'llama-3.1-8b-instant' },
+    openrouter:{ baseUrl: 'https://openrouter.ai/api/v1',    model: 'meta-llama/llama-3.1-8b-instruct:free' },
+    gemini:    { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash' },
+    openai:    { baseUrl: 'https://api.openai.com/v1',       model: 'gpt-4o-mini' },
+    together:  { baseUrl: 'https://api.together.xyz/v1',     model: 'meta-llama/Llama-3.1-8B-Instruct' },
+  };
+  dom.aiPreset.addEventListener('change', () => {
+    const v = dom.aiPreset.value;
+    if (!v) return;
+    const p = AI_PRESETS[v];
+    if (!p) return;
+    state.aiConfig.preset = v;
+    state.aiConfig.baseUrl = p.baseUrl;
+    state.aiConfig.model = p.model;
+    dom.aiBaseUrl.value = p.baseUrl;
+    dom.aiModel.value = p.model;
     persistAI();
   });
   dom.aiBaseUrl.addEventListener('input', () => { state.aiConfig.baseUrl = dom.aiBaseUrl.value.trim(); persistAI(); });

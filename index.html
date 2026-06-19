@@ -78,6 +78,17 @@
 
         <div class="ai-config" id="aiConfig" hidden>
           <div class="control">
+            <label for="aiPreset">Provedor (com tier grátis)</label>
+            <select id="aiPreset" class="select">
+              <option value="">— personalizado —</option>
+              <option value="groq">Groq (grátis, rápido) ⭐</option>
+              <option value="openrouter">OpenRouter (modelos grátis)</option>
+              <option value="gemini">Google Gemini (grátis)</option>
+              <option value="openai">OpenAI (pago)</option>
+              <option value="together">Together AI (crédito inicial)</option>
+            </select>
+          </div>
+          <div class="control">
             <label for="aiBaseUrl">Endpoint base</label>
             <input type="text" id="aiBaseUrl" placeholder="https://api.openai.com/v1" autocomplete="off" />
           </div>
@@ -98,7 +109,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             Testar conexão
           </button>
-          <p class="ai-hint">Compatível com OpenAI, OpenRouter, Groq, Together, DeepSeek, etc. Sua chave fica apenas no seu navegador.</p>
+          <p class="ai-hint">Recomendado: <strong>Groq</strong> ou <strong>OpenRouter</strong> (tier grátis real). Sua chave fica apenas no seu navegador.</p>
         </div>
       </section>
 
