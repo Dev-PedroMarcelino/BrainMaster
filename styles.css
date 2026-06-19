@@ -390,9 +390,70 @@ body {
   color: var(--text);
   font-family: inherit;
   font-size: 12px;
-  cursor: pointer;
   outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease);
 }
+.select:focus { border-color: var(--primary); }
+
+/* AI panel */
+.ai-tag {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(129, 140, 248, 0.15), rgba(236, 72, 153, 0.15));
+  color: var(--primary);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+}
+.ai-config { margin-top: 12px; }
+.ai-config .control { margin-bottom: 10px; }
+.ai-config input[type="text"],
+.ai-config input[type="password"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s var(--ease);
+}
+.ai-config input[type="text"]:focus,
+.ai-config input[type="password"]:focus { border-color: var(--primary); }
+.ai-config input::placeholder { color: var(--text-mute); opacity: 0.6; }
+.ai-key-row { display: flex; gap: 6px; }
+.ai-key-row input { flex: 1; }
+.icon-btn-sm {
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-mute);
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+  flex-shrink: 0;
+}
+.icon-btn-sm:hover { color: var(--text); border-color: var(--primary); }
+.icon-btn-sm svg { width: 14px; height: 14px; }
+.ai-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-mute);
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--surface-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.ghost-btn.block { width: 100%; justify-content: center; }
+.ghost-btn block, .ghost-btn.block { display: flex; align-items: center; gap: 6px; }
 
 input[type="range"] {
   width: 100%;

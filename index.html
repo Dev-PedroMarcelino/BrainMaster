@@ -66,9 +66,45 @@
         </button>
       </section>
 
+      <section class="panel" id="aiPanel">
+        <div class="panel-head">
+          <h2>2. IA <span class="ai-tag">opcional</span></h2>
+        </div>
+
+        <div class="control checkbox">
+          <input type="checkbox" id="aiEnabled" />
+          <label for="aiEnabled">Usar IA para gerar o mapa</label>
+        </div>
+
+        <div class="ai-config" id="aiConfig" hidden>
+          <div class="control">
+            <label for="aiBaseUrl">Endpoint base</label>
+            <input type="text" id="aiBaseUrl" placeholder="https://api.openai.com/v1" autocomplete="off" />
+          </div>
+          <div class="control">
+            <label for="aiApiKey">API Key</label>
+            <div class="ai-key-row">
+              <input type="password" id="aiApiKey" placeholder="sk-..." autocomplete="off" />
+              <button type="button" class="icon-btn-sm" id="aiKeyToggle" title="Mostrar/ocultar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="control">
+            <label for="aiModel">Modelo</label>
+            <input type="text" id="aiModel" placeholder="gpt-4o-mini" autocomplete="off" />
+          </div>
+          <button type="button" class="ghost-btn block" id="aiTestBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Testar conexão
+          </button>
+          <p class="ai-hint">Compatível com OpenAI, OpenRouter, Groq, Together, DeepSeek, etc. Sua chave fica apenas no seu navegador.</p>
+        </div>
+      </section>
+
       <section class="panel" id="customPanel" hidden>
         <div class="panel-head">
-          <h2>2. Personalizar</h2>
+          <h2>3. Personalizar</h2>
         </div>
 
         <div class="control">
@@ -116,7 +152,7 @@
 
       <section class="panel" id="exportPanel" hidden>
         <div class="panel-head">
-          <h2>3. Exportar</h2>
+          <h2>4. Exportar</h2>
         </div>
         <div class="export-grid">
           <button class="ghost-btn" id="exportPNG">

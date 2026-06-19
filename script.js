@@ -17,9 +17,17 @@
     extractedTexts: [],
     markdown: '',
     root: null,
+    rootData: null,
     customBg: null,
     deleteMode: false,
     selectedNode: null,
+    aiConfig: {
+      enabled: false,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: '',
+      model: 'gpt-4o-mini',
+    },
+    lastSource: 'local',
   };
 
   const $ = (id) => document.getElementById(id);
@@ -64,6 +72,13 @@
     loaderSteps: $('loaderSteps'),
     toastStack: $('toastStack'),
     contextMenu: $('contextMenu'),
+    aiEnabled: $('aiEnabled'),
+    aiConfigBox: $('aiConfig'),
+    aiBaseUrl: $('aiBaseUrl'),
+    aiApiKey: $('aiApiKey'),
+    aiModel: $('aiModel'),
+    aiKeyToggle: $('aiKeyToggle'),
+    aiTestBtn: $('aiTestBtn'),
   };
 
   // ============================================================
@@ -130,6 +145,168 @@
     reader.readAsDataURL(f);
   });
   setBackground('default');
+
+  // ============================================================
+  // AI CONFIG
+  // ============================================================
+  try {
+    const savedAI = JSON.parse(localStorage.getItem('bm_ai') || 'null');
+    if (savedAI && typeof savedAI === 'object') {
+      state.aiConfig = { ...state.aiConfig, ...savedAI };
+    }
+  } catch (_) {}
+  const persistAI = () => {
+    try { localStorage.setItem('bm_ai', JSON.stringify(state.aiConfig)); } catch (_) {}
+  };
+  function applyAIConfigToUI() {
+    dom.aiEnabled.checked = !!state.aiConfig.enabled;
+    dom.aiBaseUrl.value = state.aiConfig.baseUrl || '';
+    dom.aiApiKey.value = state.aiConfig.apiKey || '';
+    dom.aiModel.value = state.aiConfig.model || '';
+    dom.aiConfigBox.hidden = !state.aiConfig.enabled;
+  }
+  applyAIConfigToUI();
+  dom.aiEnabled.addEventListener('change', () => {
+    state.aiConfig.enabled = dom.aiEnabled.checked;
+    dom.aiConfigBox.hidden = !state.aiConfig.enabled;
+    persistAI();
+  });
+  dom.aiBaseUrl.addEventListener('input', () => { state.aiConfig.baseUrl = dom.aiBaseUrl.value.trim(); persistAI(); });
+  dom.aiApiKey.addEventListener('input', () => { state.aiConfig.apiKey = dom.aiApiKey.value.trim(); persistAI(); });
+  dom.aiModel.addEventListener('input', () => { state.aiConfig.model = dom.aiModel.value.trim(); persistAI(); });
+  dom.aiKeyToggle.addEventListener('click', () => {
+    dom.aiApiKey.type = dom.aiApiKey.type === 'password' ? 'text' : 'password';
+  });
+  dom.aiTestBtn.addEventListener('click', async () => {
+    showLoading('Testando conexão com a IA...');
+    try {
+      await testAIConnection();
+      hideLoading();
+      toast('Conexão com IA OK!', 'success');
+    } catch (err) {
+      hideLoading();
+      toast('Falha: ' + (err.message || err), 'error', 5000);
+    }
+  });
+
+  async function testAIConnection() {
+    const base = state.aiConfig.baseUrl.replace(/\/+$/, '');
+    const key = state.aiConfig.apiKey;
+    if (!key) throw new Error('Informe a API key');
+    const model = state.aiConfig.model;
+    const url = `${base}/chat/completions`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: 'Responda apenas com a palavra: ok' },
+        ],
+        max_tokens: 5,
+        temperature: 0,
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status} — ${t.slice(0, 160)}`);
+    }
+    return true;
+  }
+
+  async function callAIForHierarchy(text, density) {
+    const base = state.aiConfig.baseUrl.replace(/\/+$/, '');
+    const key = state.aiConfig.apiKey;
+    const model = state.aiConfig.model;
+    if (!key) throw new Error('API key não configurada');
+
+    const maxRoots = Math.max(3, Math.min(5, Math.ceil(density * 1.2)));
+    const subCount = Math.max(1, Math.ceil(density / 2));
+
+    const truncated = text.length > 24000 ? text.slice(0, 24000) + '\n\n[...texto truncado...]' : text;
+
+    const systemPrompt = `Você é um especialista em resumir conteúdo acadêmico (slides de aula, artigos, PDFs) em mapas mentais hierárquicos em português.
+
+REGRAS OBRIGATÓRIAS:
+- Responda EXCLUSIVAMENTE com um JSON válido, sem markdown, sem explicações antes ou depois.
+- O JSON deve seguir EXATAMENTE este formato:
+  {"name":"<título central curto, máx 7 palavras>","children":[{"name":"<tópico principal>","children":[{"name":"<detalhe curto, máx 12 palavras>"}]}]}
+- Máximo de ${maxRoots} tópicos principais em "children".
+- Cada tópico principal tem no máximo ${subCount} sub-itens.
+- Use português do Brasil.
+- Foque nos conceitos centrais. Ignore exemplos repetitivos, números de página, referências bibliográficas.
+- Seja conciso: títulos curtos e informativos.`;
+
+    const userPrompt = `Analise o texto abaixo (de ${truncated.length > 0 ? 'múltiplos PDFs acadêmicos' : 'um PDF'}) e gere o mapa mental em JSON.\n\nTEXTO:\n"""\n${truncated}\n"""`;
+
+    const url = `${base}/chat/completions`;
+    const body = {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 1800,
+    };
+    if (/openai|gpt|o1|o3|o4/i.test(model) || /openai\.com/.test(base)) {
+      body.response_format = { type: 'json_object' };
+    }
+
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      throw new Error(`IA HTTP ${r.status} — ${t.slice(0, 200)}`);
+    }
+    const data = await r.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const json = extractJSON(content);
+    if (!json) throw new Error('IA não retornou JSON válido');
+    return normalizeAIData(json);
+  }
+
+  function extractJSON(s) {
+    if (!s) return null;
+    try {
+      const trimmed = s.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) return JSON.parse(trimmed);
+    } catch (_) {}
+    const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) {
+      try { return JSON.parse(fence[1].trim()); } catch (_) {}
+    }
+    const first = s.indexOf('{');
+    const last = s.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      try { return JSON.parse(s.slice(first, last + 1)); } catch (_) {}
+    }
+    return null;
+  }
+
+  function normalizeAIData(obj) {
+    if (!obj || typeof obj !== 'object') return { name: 'Conteúdo', children: [] };
+    const name = String(obj.name || obj.title || 'Conteúdo').slice(0, 60);
+    const children = Array.isArray(obj.children) ? obj.children : [];
+    const clean = children
+      .filter((c) => c && (c.name || c.title))
+      .slice(0, 8)
+      .map((c) => {
+        const cn = String(c.name || c.title).slice(0, 70);
+        const subs = Array.isArray(c.children) ? c.children : [];
+        const cs = subs
+          .filter((s) => s && (s.name || s.title))
+          .slice(0, 5)
+          .map((s) => ({ name: String(s.name || s.title).slice(0, 140) }));
+        return { name: cn, children: cs };
+      })
+      .filter((c) => c.children.length > 0);
+    return { name, children: clean };
+  }
 
   // ============================================================
   // FILE UPLOAD
@@ -436,13 +613,14 @@
     }
 
     const totalTokens = workingSections.flatMap((s) => tokenize((s.title || '') + ' ' + s.content.join(' ')));
-    const topGlobal = topKeywords(totalTokens, Math.max(20, density * 10));
-    const topBigrams = bigrams(totalTokens).slice(0, 12);
+    const topGlobal = topKeywords(totalTokens, Math.max(6, density * 3));
+    const topBigrams = bigrams(totalTokens).slice(0, 5);
 
     const seen = new Set();
     const rootTerms = [];
+    const maxRoots = Math.max(3, Math.min(5, Math.ceil(density * 1.2)));
     topBigrams.forEach(([bg]) => {
-      if (rootTerms.length >= Math.max(6, density * 4)) return;
+      if (rootTerms.length >= maxRoots) return;
       const key = bg.toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
@@ -450,7 +628,7 @@
       }
     });
     topGlobal.forEach((k) => {
-      if (rootTerms.length >= Math.max(6, density * 4)) return;
+      if (rootTerms.length >= maxRoots) return;
       const key = k.word.toLowerCase();
       if (!seen.has(key) && k.word.length > 3) {
         seen.add(key);
@@ -480,13 +658,14 @@
 
         if (subs.length > 0) {
           const childTitle = s.title || capitalize(term);
+          const subCount = Math.max(1, Math.ceil(density / 2));
           node.children.push({
-            name: childTitle.length > 80 ? childTitle.slice(0, 77) + '...' : childTitle,
-            children: subs.slice(0, 3 + density).map((x) => ({ name: x })),
+            name: childTitle.length > 60 ? childTitle.slice(0, 57) + '...' : childTitle,
+            children: subs.slice(0, subCount).map((x) => ({ name: x.length > 110 ? x.slice(0, 107) + '...' : x })),
           });
           used.add(idx);
         } else if (s.title) {
-          node.children.push({ name: s.title });
+          node.children.push({ name: s.title.length > 60 ? s.title.slice(0, 57) + '...' : s.title });
           used.add(idx);
         }
       });
@@ -496,13 +675,13 @@
     const remaining = workingSections.filter((_, i) => !used.has(i));
     if (remaining.length > 0) {
       const others = { name: 'Outros Tópicos', children: [] };
-      remaining.slice(0, 8).forEach((s) => {
+      remaining.slice(0, 3).forEach((s) => {
         if (s.title) {
-          const sub = splitSentences(s.content.join(' ')).slice(0, 3).map((x) => ({ name: x }));
-          if (sub.length) others.children.push({ name: s.title.length > 80 ? s.title.slice(0, 77) + '...' : s.title, children: sub });
-          else others.children.push({ name: s.title });
+          const sub = splitSentences(s.content.join(' ')).slice(0, 2).map((x) => ({ name: x.length > 110 ? x.slice(0, 107) + '...' : x }));
+          if (sub.length) others.children.push({ name: s.title.length > 60 ? s.title.slice(0, 57) + '...' : s.title, children: sub });
+          else others.children.push({ name: s.title.length > 60 ? s.title.slice(0, 57) + '...' : s.title });
         } else if (s.content[0]) {
-          others.children.push({ name: s.content[0].slice(0, 80) + (s.content[0].length > 80 ? '...' : '') });
+          others.children.push({ name: s.content[0].slice(0, 60) + (s.content[0].length > 60 ? '...' : '') });
         }
       });
       if (others.children.length > 0) result.children.push(others);
@@ -601,7 +780,7 @@
     return NODE_ICONS.general;
   }
 
-  function wrapText(text, maxCharsPerLine = 28) {
+  function wrapText(text, maxCharsPerLine = 28, maxLines = 4) {
     const words = text.split(/\s+/);
     const lines = [];
     let current = '';
@@ -614,7 +793,7 @@
       }
     }
     if (current) lines.push(current);
-    return lines.slice(0, 3);
+    return lines.slice(0, maxLines);
   }
 
   function buildHierarchyData(data) {
@@ -632,8 +811,8 @@
     gNodes.selectAll('*').remove();
 
     const treeLayout = d3.tree()
-      .nodeSize([50, 240])
-      .separation((a, b) => (a.parent === b.parent ? 1 : 1.4));
+      .nodeSize([180, 240])
+      .separation((a, b) => (a.parent === b.parent ? 1.1 : 1.8));
 
     const tree = treeLayout(root);
     const nodes = tree.descendants();
@@ -641,18 +820,19 @@
 
     const textColor = getTextColor();
     const colors = getBranchColors();
+    const isLight = document.body.dataset.theme === 'light';
 
-    // Links (curved paths)
+    // Links (vertical curved paths — root on top, children below)
     gLinks.selectAll('path')
       .data(links)
       .join('path')
-      .attr('d', d3.linkHorizontal()
-        .x((d) => d.y)
-        .y((d) => d.x))
+      .attr('d', d3.linkVertical()
+        .x((d) => d.x)
+        .y((d) => d.y))
       .attr('fill', 'none')
       .attr('stroke', (d) => colors[d.target.depth % colors.length])
       .attr('stroke-width', (d) => Math.max(1.5, 4 - d.target.depth))
-      .attr('stroke-opacity', 0.85)
+      .attr('stroke-opacity', 0.7)
       .attr('stroke-linecap', 'round');
 
     // Nodes
@@ -660,45 +840,104 @@
       .data(nodes)
       .join('g')
       .attr('class', 'mm-node')
-      .attr('transform', (d) => `translate(${d.y},${d.x})`)
+      .attr('transform', (d) => `translate(${d.x},${d.y})`)
       .attr('data-depth', (d) => d.depth)
       .style('cursor', 'pointer');
 
-    // Background circle for root and depth 1
-    node.each(function (d) {
-      if (d.depth > 1) return;
-      const g = d3.select(this);
-      g.append('circle')
-        .attr('r', d.depth === 0 ? 8 : 5)
-        .attr('fill', d.depth === 0 ? colors[0] : colors[d.depth % colors.length])
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 2);
+    const showIcons = dom.showIcons.checked;
+    const fontSize = (d) => d.depth === 0 ? 18 : d.depth === 1 ? 15 : 13;
+    const lineHeight = (d) => d.depth === 0 ? 22 : d.depth === 1 ? 19 : 17;
+    const charW = (d) => d.depth === 0 ? 9.5 : d.depth === 1 ? 8.0 : 7.0;
+    const maxChars = (d) => d.depth === 0 ? 22 : d.depth === 1 ? 26 : 32;
+    const maxLines = (d) => d.depth === 0 ? 2 : 3;
+    const padX = 14, padY = 10;
+
+    // First pass: compute layout for each node
+    const layout = nodes.map((d) => {
+      const lines = wrapText(String(d.data.name || ''), maxChars(d), maxLines(d));
+      const icon = showIcons ? (d.depth === 0 ? '🧠 ' : getIconForName(d.data.name) + ' ') : '';
+      const measured = lines.map((ln, i) => (i === 0 ? icon + ln : ln));
+      const longest = measured.reduce((m, s) => Math.max(m, s.length), 0);
+      const w = Math.max(80, longest * charW(d) + padX * 2);
+      const h = lines.length * lineHeight(d) + padY * 2;
+      return { d, lines, icon, w, h };
     });
 
-    // Text
-    const showIcons = dom.showIcons.checked;
-    const textSel = node.append('text')
-      .attr('y', 4)
-      .attr('x', (d) => (d.depth <= 1 ? 0 : (d.children ? -12 : 12)))
-      .attr('text-anchor', (d) => (d.depth <= 1 ? 'middle' : (d.children ? 'end' : 'start')))
-      .attr('fill', textColor)
-      .attr('font-family', 'Inter, sans-serif')
-      .attr('font-weight', (d) => d.depth === 0 ? 700 : d.depth === 1 ? 600 : 400)
-      .attr('font-size', (d) => d.depth === 0 ? 18 : d.depth === 1 ? 14 : 12)
-      .text('');
+    // SVG defs for shadow
+    if (!svg.select('defs').node()) svg.append('defs');
+    const defs = svg.select('defs');
+    if (!defs.select('#mm-shadow').node()) {
+      const f = defs.append('filter').attr('id', 'mm-shadow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+      f.append('feGaussianBlur').attr('in', 'SourceAlpha').attr('stdDeviation', '3');
+      f.append('feOffset').attr('dx', 0).attr('dy', 2).attr('result', 'offsetblur');
+      f.append('feComponentTransfer').append('feFuncA').attr('type', 'linear').attr('slope', 0.35);
+      const merge = f.append('feMerge');
+      merge.append('feMergeNode');
+      merge.append('feMergeNode').attr('in', 'SourceGraphic');
+    }
 
-    textSel.each(function (d) {
-      const lines = wrapText(d.data.name, d.depth === 0 ? 22 : 28);
-      const el = d3.select(this);
-      el.selectAll('tspan').remove();
-      const lineHeight = d.depth === 0 ? 22 : d.depth === 1 ? 18 : 16;
-      const startY = -((lines.length - 1) * lineHeight) / 2;
-      const icon = showIcons ? (d.depth === 0 ? '🧠 ' : getIconForName(d.data.name) + ' ') : '';
-      lines.forEach((line, i) => {
-        el.append('tspan')
-          .attr('x', d.depth <= 1 ? 0 : (d.children ? -12 : 12))
-          .attr('y', startY + i * lineHeight)
-          .text((i === 0 ? icon : '') + line);
+    // Draw rects
+    const nodeByDatum = new Map();
+    node.each(function (d) { nodeByDatum.set(d, this); });
+    layout.forEach((info) => {
+      const el = nodeByDatum.get(info.d);
+      if (!el) return;
+      const g = d3.select(el);
+      const color = colors[info.d.depth % colors.length];
+      const isRoot = info.d.depth === 0;
+      const isLevel1 = info.d.depth === 1;
+
+      const rectX = -info.w / 2;
+      const rectY = -info.h / 2;
+
+      g.append('rect')
+        .attr('class', 'mm-card')
+        .attr('x', rectX)
+        .attr('y', rectY)
+        .attr('width', info.w)
+        .attr('height', info.h)
+        .attr('rx', isRoot ? 12 : 8)
+        .attr('ry', isRoot ? 12 : 8)
+        .attr('fill', isRoot
+          ? color
+          : (isLight ? 'rgba(255,255,255,0.92)' : 'rgba(15, 19, 32, 0.92)'))
+        .attr('stroke', color)
+        .attr('stroke-width', isRoot ? 0 : (isLevel1 ? 1.8 : 1.2))
+        .attr('stroke-opacity', isRoot ? 0 : 0.9)
+        .attr('filter', isRoot ? 'url(#mm-shadow)' : null);
+    });
+
+    // Draw text
+    layout.forEach((info) => {
+      const el = nodeByDatum.get(info.d);
+      if (!el) return;
+      const g = d3.select(el);
+      const color = colors[info.d.depth % colors.length];
+      const isRoot = info.d.depth === 0;
+      const isLevel1 = info.d.depth === 1;
+      const fill = isRoot ? '#0b0f1a' : (isLevel1 ? color : textColor);
+
+      const textX = 0;
+      const lh = lineHeight(info.d);
+      const totalH = info.lines.length * lh;
+      const startY = -totalH / 2 + lh / 2 + 3;
+
+      const text = g.append('text')
+        .attr('class', 'mm-text')
+        .attr('x', textX)
+        .attr('y', startY)
+        .attr('text-anchor', 'middle')
+        .attr('fill', fill)
+        .attr('font-family', 'Inter, sans-serif')
+        .attr('font-weight', isRoot ? 800 : isLevel1 ? 700 : 500)
+        .attr('font-size', fontSize(info.d))
+        .text('');
+
+      info.lines.forEach((line, i) => {
+        text.append('tspan')
+          .attr('x', textX)
+          .attr('y', startY + i * lh)
+          .text((i === 0 ? info.icon : '') + line);
       });
     });
 
@@ -708,11 +947,19 @@
       if (state.deleteMode) deleteNode(d);
       else showContextMenu(event.clientX, event.clientY, d);
     });
-    node.on('mouseenter', function () {
-      d3.select(this).selectAll('text').transition().duration(150).attr('fill', dom.branchColor.value);
+    node.on('mouseenter', function (_, d) {
+      const sel = d3.select(this);
+      const info = layout.find((x) => x.d === d);
+      if (!info) return;
+      sel.select('rect.mm-card').transition().duration(150).attr('stroke-width', info.d.depth === 0 ? 0 : 2.5);
     });
-    node.on('mouseleave', function () {
-      d3.select(this).selectAll('text').transition().duration(150).attr('fill', textColor);
+    node.on('mouseleave', function (_, d) {
+      const sel = d3.select(this);
+      const info = layout.find((x) => x.d === d);
+      if (!info) return;
+      const isRoot = info.d.depth === 0;
+      const isLevel1 = info.d.depth === 1;
+      sel.select('rect.mm-card').transition().duration(150).attr('stroke-width', isRoot ? 0 : (isLevel1 ? 1.8 : 1.2));
     });
 
     updateMapStats();
@@ -743,15 +990,18 @@
     const stageRect = dom.mapStage.getBoundingClientRect();
     const w = stageRect.width || 800;
     const h = stageRect.height || 600;
+    const pad = 60;
     const safeW = Math.max(bb.width, 1);
     const safeH = Math.max(bb.height, 1);
     const scale = Math.max(0.05, Math.min(
-      (w * 0.9) / (safeW + 200),
-      (h * 0.9) / (safeH + 100),
-      1.5
+      (w - pad * 2) / safeW,
+      (h - pad * 2) / safeH,
+      1.6
     ));
-    const tx = w / 2 - (bb.x + bb.width / 2) * scale;
-    const ty = h / 2 - (bb.y + bb.height / 2) * scale;
+    const cx = bb.x + bb.width / 2;
+    const cy = bb.y + bb.height / 2;
+    const tx = w / 2 - cx * scale;
+    const ty = h / 2 - cy * scale;
     if (!isFinite(tx) || !isFinite(ty) || !isFinite(scale)) return;
     svg.transition().duration(400).call(
       zoom.transform,
@@ -889,17 +1139,37 @@
       }
       if (!isRedo) state.extractedTexts = texts;
 
-      updateLoading(45, 'Identificando conceitos-chave...', 1);
       const combined = state.extractedTexts.map((t) => `[Documento: ${t.name}]\n${t.text}`).join('\n\n');
       state.rawText = combined;
 
-      await delay(150);
-      updateLoading(65, 'Construindo hierarquia...', 2);
       const density = +dom.mapDensity.value;
-      const tree = buildHierarchy(combined, density);
+      let tree;
+      let source;
+
+      if (state.aiConfig.enabled && state.aiConfig.apiKey) {
+        updateLoading(50, 'IA analisando conteúdo...', 1);
+        try {
+          tree = await callAIForHierarchy(combined, density);
+          source = 'ia';
+        } catch (aiErr) {
+          console.warn('IA falhou, usando NLP local:', aiErr);
+          updateLoading(55, 'IA falhou, usando NLP local...', 1);
+          await delay(400);
+          tree = buildHierarchy(combined, density);
+          source = 'local-fallback';
+          toast('IA falhou, usando NLP local: ' + (aiErr.message || aiErr), 'warn', 4500);
+        }
+      } else {
+        updateLoading(45, 'Identificando conceitos-chave...', 1);
+        tree = buildHierarchy(combined, density);
+        source = 'local';
+      }
+
+      await delay(150);
+      updateLoading(75, 'Construindo hierarquia...', 2);
       state.rootData = tree;
 
-      updateLoading(85, 'Renderizando mapa mental...', 3);
+      updateLoading(90, 'Renderizando mapa mental...', 3);
       state.markdown = toMarkdown(tree);
       state.root = buildHierarchyData(tree);
 
@@ -915,11 +1185,14 @@
       render();
 
       const title = state.files.length === 1 ? state.files[0].name.replace(/\.pdf$/i, '') : `Mapa de ${state.files.length} documentos`;
-      dom.mapTitle.textContent = title;
+      if (source === 'ia' && tree.name) dom.mapTitle.textContent = tree.name;
+      else dom.mapTitle.textContent = title;
 
+      state.lastSource = source;
       await delay(300);
       hideLoading();
-      toast(isRedo ? 'Mapa refeito!' : 'Mapa mental gerado!', 'success');
+      const srcLabel = source === 'ia' ? 'via IA' : (source === 'local-fallback' ? 'via NLP local (IA falhou)' : 'via NLP local');
+      toast((isRedo ? 'Mapa refeito' : 'Mapa mental gerado') + ` ${srcLabel}!`, 'success');
     } catch (err) {
       console.error(err);
       hideLoading();

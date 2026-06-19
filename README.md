@@ -5,7 +5,10 @@
 ## Funcionalidades
 
 - **Upload múltiplo de PDFs** com drag-and-drop
-- **Geração automática de mapa mental** via NLP (tokenização, stopwords, bigramas, detecção de títulos e hierarquia)
+- **IA opcional** (OpenAI-compatível: OpenAI, OpenRouter, Groq, Together, DeepSeek) para gerar o mapa mental a partir do conteúdo dos PDFs, com fallback automático para NLP local se a IA falhar
+- **Geração automática de mapa mental** via NLP local (tokenização, stopwords, bigramas, detecção de títulos e hierarquia)
+- **Cards arredondados** ao redor de cada nó, com cores por profundidade — visual limpo e organizado
+- **Layout vertical** (raiz no topo, filhos descendo) com mind map tradicional
 - **Customização visual** em tempo real:
   - Cor dos ramos
   - Cor do texto
@@ -28,8 +31,20 @@
 - **D3.js** — renderização customizada do mapa mental em SVG
 - **html2canvas** — geração de PNG
 - **jsPDF** — geração de PDF
+- **OpenAI-compatible API** (opcional) — geração de mapa mental via LLM
 - **Inter** + **Space Grotesk** + **JetBrains Mono** — tipografia (Google Fonts)
 - HTML5 + CSS3 + JavaScript (vanilla, sem build step)
+
+## IA (opcional)
+
+Você pode usar qualquer API compatível com OpenAI para gerar o mapa mental a partir do conteúdo dos PDFs. A chave fica salva apenas no `localStorage` do seu navegador.
+
+**Provedores sugeridos (com camada gratuita):**
+- **OpenRouter** — `https://openrouter.ai/api/v1` (modelo: `meta-llama/llama-3.1-8b-instruct:free`)
+- **Groq** — `https://api.groq.com/openai/v1` (modelo: `llama-3.1-8b-instant`)
+- **OpenAI** — `https://api.openai.com/v1` (modelo: `gpt-4o-mini`)
+
+Se a IA não estiver configurada, ou se a chamada falhar, o app usa automaticamente o algoritmo de NLP local.
 
 ## Estrutura
 
