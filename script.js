@@ -247,9 +247,13 @@
     const maxRoots = Math.max(3, Math.min(5, Math.ceil(density * 1.2)));
     const subCount = Math.max(1, Math.ceil(density / 2));
 
-    const truncated = text.length > 24000 ? text.slice(0, 24000) + '\n\n[...texto truncado...]' : text;
+    // Pre-processa localmente: extrai os conceitos-chave e frases curtas
+    // para reduzir drasticamente o tamanho do payload (evita 413 em provedores com TPM baixo)
+    const condensed = prepareTextForAI(text, maxRoots, subCount);
 
-    const systemPrompt = `Você é um especialista em resumir conteúdo acadêmico (slides de aula, artigos, PDFs) em mapas mentais hierárquicos em português.
+    const systemPrompt = `Você é um especialista em organizar conteúdo acadêmico (slides de aula, artigos, PDFs) em mapas mentais hierárquicos em português do Brasil.
+
+Você receberá uma lista PRÉ-SELECIONADA de conceitos e frases-chave extraídos de ${state.extractedTexts.length} documento(s). Sua tarefa é APENAS organizar essas informações em uma hierarquia JSON clara.
 
 REGRAS OBRIGATÓRIAS:
 - Responda EXCLUSIVAMENTE com um JSON válido, sem markdown, sem explicações antes ou depois.
@@ -258,10 +262,12 @@ REGRAS OBRIGATÓRIAS:
 - Máximo de ${maxRoots} tópicos principais em "children".
 - Cada tópico principal tem no máximo ${subCount} sub-itens.
 - Use português do Brasil.
-- Foque nos conceitos centrais. Ignore exemplos repetitivos, números de página, referências bibliográficas.
+- Escolha os ${maxRoots} conceitos mais importantes e agrupe os detalhes relacionados.
 - Seja conciso: títulos curtos e informativos.`;
 
-    const userPrompt = `Analise o texto abaixo (de ${truncated.length > 0 ? 'múltiplos PDFs acadêmicos' : 'um PDF'}) e gere o mapa mental em JSON.\n\nTEXTO:\n"""\n${truncated}\n"""`;
+    const userPrompt = `Organize os conceitos abaixo em um mapa mental hierárquico (${maxRoots} tópicos, ${subCount} sub-itens cada):
+
+${condensed}`;
 
     const url = `${base}/chat/completions`;
     const body = {
@@ -271,7 +277,7 @@ REGRAS OBRIGATÓRIAS:
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.2,
-      max_tokens: 1800,
+      max_tokens: 1500,
     };
     if (/openai|gpt|o1|o3|o4/i.test(model) || /openai\.com/.test(base)) {
       body.response_format = { type: 'json_object' };
@@ -291,6 +297,81 @@ REGRAS OBRIGATÓRIAS:
     const json = extractJSON(content);
     if (!json) throw new Error('IA não retornou JSON válido');
     return normalizeAIData(json);
+  }
+
+  // Pre-processa o texto bruto dos PDFs em um resumo compacto com os
+  // conceitos e frases mais importantes. Garante que o payload caiba
+  // no limite de tokens de provedores com tier gratuito (Groq: ~6k TPM).
+  function prepareTextForAI(text, maxRoots, subCount) {
+    const allText = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    // Quebra em parágrafos
+    const paragraphs = allText.split(/\n+/).map((p) => p.trim()).filter((p) => p.length > 20);
+
+    // Detecta títulos e separa o conteúdo por seção
+    const sections = [];
+    let current = { title: null, content: [] };
+    for (const para of paragraphs) {
+      if (isLikelyTitle(para) && para.length < 90) {
+        if (current.title || current.content.length) sections.push(current);
+        current = { title: para, content: [] };
+      } else {
+        current.content.push(para);
+      }
+    }
+    if (current.title || current.content.length) sections.push(current);
+
+    // Top keywords + bigramas
+    const allTokens = tokenize(allText);
+    const topK = topKeywords(allTokens, maxRoots * 3).map((k) => k.word);
+    const topB = bigrams(allTokens).slice(0, maxRoots * 2).map(([bg]) => bg);
+
+    // Pontua cada parágrafo por quantos conceitos-chave ele contém
+    function score(text) {
+      const t = text.toLowerCase();
+      let s = 0;
+      for (const k of topK) if (t.includes(k)) s += 2;
+      for (const b of topB) if (t.includes(b)) s += 3;
+      return s;
+    }
+
+    // Seleciona as melhores frases (sentenças) de cada seção
+    const limitChars = 4500; // alvo seguro para ~1500 tokens
+    let out = '';
+    const usedSent = new Set();
+
+    // 1) Títulos detectados (alta relevância)
+    const titles = sections.filter((s) => s.title).map((s) => s.title);
+    if (titles.length) {
+      out += 'TÍTULOS DAS SEÇÕES:\n' + titles.slice(0, 20).join('\n') + '\n\n';
+    }
+
+    // 2) Conceitos-chave
+    out += 'CONCEITOS-CHAVE: ' + [...new Set([...topB, ...topK])].slice(0, 25).join(', ') + '\n\n';
+
+    // 3) Frases mais relevantes (rankeadas)
+    const allSentences = [];
+    for (const sec of sections) {
+      const text = (sec.title ? sec.title + '. ' : '') + sec.content.join(' ');
+      for (const sent of splitSentences(text)) {
+        if (sent.length < 30 || sent.length > 240) continue;
+        if (usedSent.has(sent)) continue;
+        usedSent.add(sent);
+        allSentences.push({ sent, score: score(sent) });
+      }
+    }
+    allSentences.sort((a, b) => b.score - a.score);
+
+    const targetSentCount = (maxRoots * subCount) + 8;
+    const topSents = allSentences.slice(0, targetSentCount);
+
+    out += 'FRASES RELEVANTES DOS DOCUMENTOS:\n';
+    for (const { sent } of topSents) {
+      if (out.length + sent.length + 2 > limitChars) break;
+      out += '- ' + sent + '\n';
+    }
+
+    return out;
   }
 
   function extractJSON(s) {
