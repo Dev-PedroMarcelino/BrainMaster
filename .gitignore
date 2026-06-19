@@ -14,3 +14,6 @@ dist/
 build/
 .cache/
 .playwright-mcp/
+
+# Vercel
+.vercel/
